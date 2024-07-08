@@ -10,13 +10,12 @@ LAT = 55.7476
 LNG = 37.6415
 ROUTES_FOLDER = 'routes/'
 SEND_BUS_URL = 'ws://127.0.0.1:8080'
-GET_BUS_URL = 'ws://127.0.0.1:8000'
-TICK =1
+TICK = 1
 
 
 async def generate_position(busId, route):
     return json.dumps({
-        'busID': busId,
+        'busId': busId,
         'lat': LAT+random.uniform(0.0, 0.00019),
         'lng': LNG+random.uniform(0.0, 0.0009),
         'route': route
@@ -27,7 +26,7 @@ async def run_bus(route, coordinates, url=SEND_BUS_URL):
     async with open_websocket_url(url) as ws:
         for lat, lng in coordinates:
             message = {
-                'busID': f'{route}-0', 'lat': lat, 'lng': lng, 'route': route,
+                'busId': f'{route}-0', 'lat': lat, 'lng': lng, 'route': route,
             }
             await ws.send_message(json.dumps(message, ensure_ascii=False))
             await trio.sleep(TICK)
