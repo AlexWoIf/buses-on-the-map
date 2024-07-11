@@ -1,1 +1,2 @@
 trio-websocket==0.11.*
+asyncclick==8.1.*

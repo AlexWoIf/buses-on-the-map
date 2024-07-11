@@ -1,27 +1,55 @@
+import contextlib
 import json
+import logging
 import os
 import random
-import trio
-from itertools import islice, cycle
+from itertools import cycle, islice
+from functools import wraps
 from sys import stderr
-from trio_websocket import open_websocket_url
+
+import asyncclick as click
+import trio
+from trio_websocket import open_websocket_url, ConnectionClosed, HandshakeError
 
 
-LAT = 55.7476
-LNG = 37.6415
+DEBUG_LEVEL = 'INFO'
 ROUTES_FOLDER = 'routes/'
 SEND_BUS_URL = 'ws://127.0.0.1:8080'
-TICK = 0.1
-NUM_BUSES = 40
-NUM_CHANNELS = 40
+EMULATOR_DELAY = 0.05
+NUM_BUSES = 2
+NUM_CHANNELS = 10
 
-async def send_updates(receive_channel, server_address=SEND_BUS_URL):
+
+logger = logging.getLogger(name=__name__)
+
+
+def retry(handler):
+    @wraps(handler)
+    async def _wrapper(*args, **kwargs):
+        retry = 0
+        while True:
+            try:
+                logger.debug('Try handler')
+                await handler(*args, **kwargs)
+                logger.debug('Handler finished')
+                retry = 0
+                break
+            except* (HandshakeError, ConnectionClosed) as exc_group:
+                logger.error(f'Error {type(exc_group)}. Sleeping {retry}sec(s)')
+                await trio.sleep(retry)
+                retry = (retry + 1) * 2
+    return _wrapper
+
+
+@retry
+async def send_updates(receive_channel, server_address, refresh_timeout):
+    logger.debug(f'Try to open websocket {server_address}')
     async with open_websocket_url(server_address) as ws:
-        async with receive_channel:
+        logger.debug(f'Try send data to {server_address}')
+        while  True:
             async for message in receive_channel:
-                # print(message)
                 await ws.send_message(message)
-                await trio.sleep(TICK)
+                await trio.sleep(refresh_timeout)
 
     
 async def run_bus(busId, route, coordinates, send_channel):
@@ -38,39 +66,77 @@ async def run_bus(busId, route, coordinates, send_channel):
             await send_channel.send(json.dumps(message, ensure_ascii=False))
 
 
-def load_routes(folder=ROUTES_FOLDER):
+def load_routes(buses_per_route, routes_number=0, emulator_id='',
+                folder=ROUTES_FOLDER):
     files = os.listdir(folder)
-    for file_name in files:
+    for file_count, file_name in enumerate(files):
+        if routes_number > 0 and routes_number == file_count:
+            break
         file_path = os.path.join(folder, file_name)
         with open(file_path, 'r') as file:
             route = json.load(file)
-            for counter in range(NUM_BUSES):
+            for counter in range(buses_per_route):
                 busId = f'{route["name"]}-{counter}'
                 yield busId, route['name'], route['coordinates']
 
+'''
+- `server` - адрес сервера
+- `routes_number` — количество маршрутов
+- `buses_per_route` — количество автобусов на каждом маршруте
+- `websockets_number` — количество открытых веб-сокетов
+- `emulator_id` — префикс к busId на случай запуска нескольких экземпляров имитатора
+- `refresh_timeout` — задержка в обновлении координат сервера
+- `v` — настройка логирования
+'''
 
-async def main():
+@click.command()
+@click.option('--server', default=SEND_BUS_URL, help='Адрес сервера.')
+@click.option('--routes_number', default=0, help='Количество маршрутов.')
+@click.option('--buses_per_route', default=NUM_BUSES, help='Количество '
+              'автобусов на каждом маршруте.')
+@click.option('--websockets_number', default=NUM_CHANNELS, help='Количество '
+              'открытых веб-сокетов.')
+@click.option('--emulator_id', default='', help='Префикс к busId на случай '
+              'запуска нескольких экземпляров имитатора')
+@click.option('--refresh_timeout', default=EMULATOR_DELAY, help='Задержка в '
+              'обновлении координат сервера')
+@click.option('--v', default=DEBUG_LEVEL, help='Уровень логгирования')
+async def main(**kwargs):
+    websockets_number = kwargs['websockets_number']
+    server = kwargs['server']
+    buses_per_route = kwargs['buses_per_route']
+    refresh_timeout = kwargs['refresh_timeout']
+    routes_number = kwargs['routes_number']
+    emulator_id = kwargs['emulator_id']
+    loglevel = kwargs['v']
+
+    logger.setLevel(getattr(logging, loglevel.upper()))
+    format_str = '%(levelname)s:%(filename)s:[%(asctime)s] %(message)s'
+    formatter = logging.Formatter(format_str)
+    log_handler = logging.StreamHandler()
+    log_handler.setFormatter(formatter)
+    logger.addHandler(log_handler)
+    logger.debug(kwargs)
+
     async with trio.open_nursery() as nursery:
         send_channels = []
-        for _ in range(NUM_CHANNELS):
+        for _ in range(websockets_number):
             send_channel, receive_channel = trio.open_memory_channel(0)
             send_channels.append(send_channel)
             try:
-                nursery.start_soon(send_updates, receive_channel, SEND_BUS_URL)
+                nursery.start_soon(send_updates, receive_channel, server,
+                                   refresh_timeout)
             except OSError as ose:
                 print('Connection attempt failed: %s' % ose, file=stderr)
-        for busId, route, coordinates in load_routes():
+        for busId, route, coordinates in load_routes(buses_per_route,
+                                                     routes_number,
+                                                     emulator_id):
             send_channel = random.choices(send_channels)[0]
-            # send_channel = send_channels[0]
-            nursery.start_soon(run_bus, busId, route, coordinates, send_channel)
+            nursery.start_soon(run_bus, busId, route, coordinates,
+                               send_channel)
 
-
-def test_load_routes():
-    for count, (busId, route, _) in enumerate(load_routes()):
-        assert busId == f'{route}-{count%NUM_BUSES}'
-        if count == 30:
-            break
 
 
 if __name__ == '__main__':
-    trio.run(main)
+    with contextlib.suppress(KeyboardInterrupt):
+        main(_anyio_backend='trio')
