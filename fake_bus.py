@@ -3,21 +3,16 @@ import json
 import logging
 import os
 import random
-from itertools import cycle, islice
 from functools import wraps
+from itertools import cycle, islice
 from sys import stderr
 
 import asyncclick as click
 import trio
-from trio_websocket import open_websocket_url, ConnectionClosed, HandshakeError
+from trio_websocket import ConnectionClosed, HandshakeError, open_websocket_url
 
-
-DEBUG_LEVEL = 'INFO'
-ROUTES_FOLDER = 'routes/'
-SEND_BUS_URL = 'ws://127.0.0.1:8080'
-EMULATOR_DELAY = 0.05
-NUM_BUSES = 2
-NUM_CHANNELS = 10
+from constants import (DEBUG_LEVEL, EMULATOR_DELAY, NUM_BUSES, NUM_CHANNELS,
+                       ROUTES_FOLDER, SEND_BUS_URL)
 
 
 logger = logging.getLogger(name=__name__)
