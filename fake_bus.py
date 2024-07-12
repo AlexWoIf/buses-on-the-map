@@ -32,7 +32,7 @@ def retry(handler):
             except* (HandshakeError, ConnectionClosed) as exc_group:
                 logger.error(f'Error {type(exc_group)}. Sleeping {retry}sec(s)')
                 await trio.sleep(retry)
-                retry = (retry + 1) * 2
+                retry = (retry + 1) * 2 if retry < 10 else 10
     return _wrapper
 
 

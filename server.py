@@ -11,8 +11,11 @@ from constants import BROWSER_DELAY, DEBUG_LEVEL
 logger = logging.getLogger(name=__name__)
 
 
-def is_inside(bounds, lat, lng):
+def is_inside(bounds, bus):
+    if not bounds:
+        return False
     south_lat, north_lat, west_lng, east_lng = bounds.values()
+    lat, lng, _ = bus.values()
     return south_lat < lat < north_lat and west_lng < lng < east_lng
 
 
@@ -24,12 +27,11 @@ async def recieve_bus_data(request, buses):
             bus = json.loads(message)
             busId = bus.pop('busId')
             buses[busId] = bus
-            logger.debug(f'Total {len(buses)} buses')
         except ConnectionClosed:
             break
 
 
-async def send_bus_data(ws, buses):
+async def send_bus_data(ws, buses, bounds):
     while True:
         try:
             answer = {
@@ -37,25 +39,29 @@ async def send_bus_data(ws, buses):
                 'buses': [
                     {**{'busId': busId}, **bus_values}
                     for busId, bus_values in buses.items()
+                    if is_inside(bounds, bus_values)
                 ]
             }
+            logger.debug(len(buses.values()))
+            logger.debug(bounds)
+            logger.debug(len(answer['buses']))
             await ws.send_message(json.dumps(answer))
             await trio.sleep(BROWSER_DELAY)
         except ConnectionClosed:
             break
 
 
-async def listen_browser(ws, buses):
+async def listen_browser(ws, buses, bounds):
     while True:
         try:
             message = await ws.get_message()
-            bounds = json.loads(message).get('data')
+            new_bounds = json.loads(message).get('data')
+            for key, value in new_bounds.items():
+                bounds[key] = value
             logger.info(bounds)
-            logger.info(buses)
             bus_count = 0
             for bus_data in buses.values():
-                lat, lng, _ = bus_data.values()
-                if is_inside(bounds, lat, lng):
+                if is_inside(bounds, bus_data):
                     bus_count += 1
             logger.info(f'Total {len(buses)} bus(es). {bus_count} bus(es) '
                         'inside the browser window')
@@ -63,11 +69,11 @@ async def listen_browser(ws, buses):
             break
 
 
-async def handle_browser(request, buses):
+async def handle_browser(request, buses, bounds):
     ws = await request.accept()
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(listen_browser, ws, buses)
-        nursery.start_soon(send_bus_data, ws, buses)
+        nursery.start_soon(listen_browser, ws, buses, bounds)
+        nursery.start_soon(send_bus_data, ws, buses, bounds)
 
 
 async def main():
@@ -80,9 +86,10 @@ async def main():
     logger.addHandler(log_handler)
 
     buses = {}
+    bounds = {}
     bus_get_data_handler = lambda request: recieve_bus_data(request, buses)
     bus_get_data_server = lambda: serve_websocket(bus_get_data_handler, '127.0.0.1', 8080, ssl_context=None)
-    bus_send_data_handler = lambda request: handle_browser(request, buses)
+    bus_send_data_handler = lambda request: handle_browser(request, buses, bounds)
     bus_send_data_server = lambda: serve_websocket(bus_send_data_handler, '127.0.0.1', 8000, ssl_context=None)
     async with trio.open_nursery() as nursery:
         nursery.start_soon(bus_get_data_server)
