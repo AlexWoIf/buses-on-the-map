@@ -11,6 +11,11 @@ from constants import BROWSER_DELAY, DEBUG_LEVEL
 logger = logging.getLogger(name=__name__)
 
 
+def is_inside(bounds, lat, lng):
+    south_lat, north_lat, west_lng, east_lng = bounds.values()
+    return south_lat < lat < north_lat and west_lng < lng < east_lng
+
+
 async def recieve_bus_data(request, buses):
     ws = await request.accept()
     while True:
@@ -40,11 +45,20 @@ async def send_bus_data(ws, buses):
             break
 
 
-async def listen_browser(ws):
+async def listen_browser(ws, buses):
     while True:
         try:
             message = await ws.get_message()
-            logger.info(message)
+            bounds = json.loads(message).get('data')
+            logger.info(bounds)
+            logger.info(buses)
+            bus_count = 0
+            for bus_data in buses.values():
+                lat, lng, _ = bus_data.values()
+                if is_inside(bounds, lat, lng):
+                    bus_count += 1
+            logger.info(f'Total {len(buses)} bus(es). {bus_count} bus(es) '
+                        'inside the browser window')
         except ConnectionClosed:
             break
 
@@ -52,7 +66,7 @@ async def listen_browser(ws):
 async def handle_browser(request, buses):
     ws = await request.accept()
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(listen_browser, ws)
+        nursery.start_soon(listen_browser, ws, buses)
         nursery.start_soon(send_bus_data, ws, buses)
 
 
@@ -75,6 +89,12 @@ async def main():
         nursery.start_soon(bus_send_data_server)
 
 
+def test_is_inside():
+    bounds = {'south_lat': 55.77966236981707, 'north_lat': 55.82317686868505, 'west_lng': 37.45831489562989, 'east_lng': 37.56071090698243}
+    bus = {'lat': 55.809727230415, 'lng': 37.462571818793, 'route': '100'}
+    assert is_inside(bounds, bus['lat'], bus['lng'])
+
+    
 if __name__ == '__main__':
     with contextlib.suppress(KeyboardInterrupt):
         trio.run(main)
