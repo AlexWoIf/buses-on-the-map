@@ -72,6 +72,7 @@ def load_routes(buses_per_route, routes_number=0, emulator_id='',
                 busId = f'{route["name"]}-{counter}'
                 yield busId, route['name'], route['coordinates']
 
+
 '''
 - `server` - адрес сервера
 - `routes_number` — количество маршрутов
@@ -81,7 +82,6 @@ def load_routes(buses_per_route, routes_number=0, emulator_id='',
 - `refresh_timeout` — задержка в обновлении координат сервера
 - `v` — настройка логирования
 '''
-
 @click.command()
 @click.option('--server', default=SEND_BUS_URL, help='Адрес сервера.')
 @click.option('--routes_number', default=0, help='Количество маршрутов.')

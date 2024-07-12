@@ -3,6 +3,7 @@ import json
 import logging
 from dataclasses import asdict
 
+import asyncclick as click
 import trio
 from trio_websocket import ConnectionClosed, serve_websocket
 
@@ -59,8 +60,19 @@ async def handle_browser(request, buses):
         nursery.start_soon(send_bus_data, ws, buses, bounds)
 
 
-async def main():
-    loglevel = DEBUG_LEVEL
+'''
+bus_port - порт для имитатора автобусов
+browser_port - порт для браузера
+v — настройка логирования
+'''
+@click.command()
+@click.option('--bus_port', default=8080, help='Порт для имитатора автобусов')
+@click.option('--browser_port', default=8000, help='Порт для браузера')
+@click.option('--v', default=DEBUG_LEVEL, help='Порт для браузера')
+async def main(**kwargs):
+    bus_port = kwargs['bus_port']
+    browser_port = kwargs['browser_port']
+    loglevel = kwargs['v']
     logger.setLevel(getattr(logging, loglevel.upper()))
     format_str = '%(levelname)s:%(filename)s:[%(asctime)s] %(message)s'
     formatter = logging.Formatter(format_str)
@@ -70,9 +82,11 @@ async def main():
 
     buses = {}
     bus_get_data_handler = lambda request: recieve_bus_data(request, buses)
-    bus_get_data_server = lambda: serve_websocket(bus_get_data_handler, '127.0.0.1', 8080, ssl_context=None)
+    bus_get_data_server = lambda: serve_websocket(
+        bus_get_data_handler, '127.0.0.1', bus_port, ssl_context=None)
     bus_send_data_handler = lambda request: handle_browser(request, buses)
-    bus_send_data_server = lambda: serve_websocket(bus_send_data_handler, '127.0.0.1', 8000, ssl_context=None)
+    bus_send_data_server = lambda: serve_websocket(
+        bus_send_data_handler, '127.0.0.1', browser_port, ssl_context=None)
     async with trio.open_nursery() as nursery:
         nursery.start_soon(bus_get_data_server)
         nursery.start_soon(bus_send_data_server)
@@ -80,4 +94,4 @@ async def main():
     
 if __name__ == '__main__':
     with contextlib.suppress(KeyboardInterrupt):
-        trio.run(main)
+        main(_anyio_backend='trio')
