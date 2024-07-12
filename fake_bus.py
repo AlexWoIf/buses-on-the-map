@@ -37,17 +37,14 @@ def retry(handler):
 
 
 @retry
-async def send_updates(receive_channel, server_address, refresh_timeout):
-    logger.debug(f'Try to open websocket {server_address}')
+async def send_updates(receive_channel, server_address):
     async with open_websocket_url(server_address) as ws:
-        logger.debug(f'Try send data to {server_address}')
         while  True:
             async for message in receive_channel:
                 await ws.send_message(message)
-                await trio.sleep(refresh_timeout)
 
     
-async def run_bus(busId, route, coordinates, send_channel):
+async def run_bus(busId, route, coordinates, send_channel, refresh_timeout):
     async with send_channel:
         slice = random.randrange(0, len(coordinates))
         coordinates = cycle(coordinates[slice:] + coordinates[:slice])
@@ -59,6 +56,7 @@ async def run_bus(busId, route, coordinates, send_channel):
                 'route': route,
             }
             await send_channel.send(json.dumps(message, ensure_ascii=False))
+            await trio.sleep(refresh_timeout)
 
 
 def load_routes(buses_per_route, routes_number=0, emulator_id='',
@@ -119,8 +117,7 @@ async def main(**kwargs):
             send_channel, receive_channel = trio.open_memory_channel(0)
             send_channels.append(send_channel)
             try:
-                nursery.start_soon(send_updates, receive_channel, server,
-                                   refresh_timeout)
+                nursery.start_soon(send_updates, receive_channel, server)
             except OSError as ose:
                 print('Connection attempt failed: %s' % ose, file=stderr)
         for busId, route, coordinates in load_routes(buses_per_route,
@@ -128,7 +125,7 @@ async def main(**kwargs):
                                                      emulator_id):
             send_channel = random.choices(send_channels)[0]
             nursery.start_soon(run_bus, busId, route, coordinates,
-                               send_channel)
+                               send_channel, refresh_timeout)
 
 
 
