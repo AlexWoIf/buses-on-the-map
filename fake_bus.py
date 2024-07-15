@@ -4,7 +4,7 @@ import logging
 import os
 import random
 from functools import wraps
-from itertools import cycle, islice
+from itertools import cycle
 from sys import stderr
 
 import asyncclick as click
@@ -39,11 +39,11 @@ def retry(handler):
 @retry
 async def send_updates(receive_channel, server_address):
     async with open_websocket_url(server_address) as ws:
-        while  True:
+        while True:
             async for message in receive_channel:
                 await ws.send_message(message)
 
-    
+
 async def run_bus(busId, route, coordinates, send_channel, refresh_timeout):
     async with send_channel:
         slice = random.randrange(0, len(coordinates))
@@ -93,7 +93,7 @@ def load_routes(buses_per_route, routes_number=0, emulator_id='',
               'запуска нескольких экземпляров имитатора')
 @click.option('--refresh_timeout', default=EMULATOR_DELAY, help='Задержка в '
               'обновлении координат сервера')
-@click.option('--v', default=DEBUG_LEVEL, help='Уровень логгирования')
+@click.option('-v', default=DEBUG_LEVEL, help='Уровень логгирования')
 async def main(**kwargs):
     websockets_number = kwargs['websockets_number']
     server = kwargs['server']
@@ -126,7 +126,6 @@ async def main(**kwargs):
             send_channel = random.choices(send_channels)[0]
             nursery.start_soon(run_bus, busId, route, coordinates,
                                send_channel, refresh_timeout)
-
 
 
 if __name__ == '__main__':

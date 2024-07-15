@@ -42,14 +42,40 @@ async def send_bus_data(ws, buses, bounds):
             break
 
 
+def get_bounds_from(message):
+    return json.loads(message)['data']
+
+
+async def handle_empty_message(ws):
+    try:
+        answer = {'msgType': 'Errors', 'errors': ['Requires valid JSON']}
+        await ws.send_message(json.dumps(answer))
+    except ConnectionClosed:
+        pass
+
+
+async def handle_wrong_message(ws):
+    try:
+        answer = {'msgType': 'Errors', 'errors': ['Requires msgType specified']}
+        await ws.send_message(json.dumps(answer))
+    except ConnectionClosed:
+        pass
+
+
 async def listen_browser(ws, bounds):
     while True:
         try:
             message = await ws.get_message()
-            new_bounds = json.loads(message).get('data')
+            new_bounds = get_bounds_from(message)
             bounds.update(new_bounds)
         except ConnectionClosed:
             break
+        except json.JSONDecodeError as exc:
+            logger.error(exc)
+            await handle_empty_message(ws)
+        except KeyError as exc:
+            logger.error(exc)
+            await handle_wrong_message(ws)
 
 
 async def handle_browser(request, buses):
@@ -68,7 +94,7 @@ v — настройка логирования
 @click.command()
 @click.option('--bus_port', default=8080, help='Порт для имитатора автобусов')
 @click.option('--browser_port', default=8000, help='Порт для браузера')
-@click.option('--v', default=DEBUG_LEVEL, help='Порт для браузера')
+@click.option('-v', default=DEBUG_LEVEL, help='Порт для браузера')
 async def main(**kwargs):
     bus_port = kwargs['bus_port']
     browser_port = kwargs['browser_port']
@@ -81,12 +107,19 @@ async def main(**kwargs):
     logger.addHandler(log_handler)
 
     buses = {}
-    bus_get_data_handler = lambda request: recieve_bus_data(request, buses)
-    bus_get_data_server = lambda: serve_websocket(
-        bus_get_data_handler, '127.0.0.1', bus_port, ssl_context=None)
-    bus_send_data_handler = lambda request: handle_browser(request, buses)
-    bus_send_data_server = lambda: serve_websocket(
-        bus_send_data_handler, '127.0.0.1', browser_port, ssl_context=None)
+
+    def bus_get_data_handler(request): return recieve_bus_data(request, buses)
+
+    def bus_get_data_server():
+        return serve_websocket(bus_get_data_handler, '127.0.0.1',
+                               bus_port, ssl_context=None)
+
+    def bus_send_data_handler(request): return handle_browser(request, buses)
+
+    def bus_send_data_server():
+        return serve_websocket(bus_send_data_handler, '127.0.0.1',
+                               browser_port, ssl_context=None)
+
     async with trio.open_nursery() as nursery:
         nursery.start_soon(bus_get_data_server)
         nursery.start_soon(bus_send_data_server)
