@@ -38,7 +38,7 @@ async def send_buses(ws, buses, bounds):
     await trio.sleep(BROWSER_DELAY)
     
 
-async def send_error(ws, bounds):
+async def send_bounds_error(ws, bounds):
     answer = {'msgType': 'Errors',
               'errors': bounds.error, }
     logger.debug(f'Send error: {bounds.error}')
@@ -50,7 +50,7 @@ async def send_error(ws, bounds):
 async def send_answer_to_browser(ws, buses, bounds):
     while True:
         if bounds.error:
-            await send_error(ws, bounds)
+            await send_bounds_error(ws, bounds)
         else:
             await send_buses(ws, buses, bounds)
 
