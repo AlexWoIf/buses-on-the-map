@@ -19,12 +19,27 @@ async def recieve_bus_data(buses, request):
     ws = await request.accept()
     try:
         while True:
-            message = await ws.get_message()
-            bus = Bus(*json.loads(message).values())
-            busId = bus.busId
-            buses[busId] = bus
-    except ConnectionClosed:
-        logger.debug('Connection on bus collector port was closed')
+            try:
+                message = await ws.get_message()
+                message_decoded = json.loads(message)
+                bus = Bus(message_decoded['busId'],
+                          message_decoded['lat'],
+                          message_decoded['lng'],
+                          message_decoded['route'])
+                busId = bus.busId
+                buses[busId] = bus
+            except json.JSONDecodeError as exc:
+                logger.error(f'Decode error: {exc=}')
+                error = {'msgType': 'Errors',
+                        'errors': 'ErrorNot a valid JSON provided'}
+                await ws.send_message(json.dumps(error))
+            except KeyError as exc:
+                logger.error(f'Key doesn\'t exist: {exc=}')
+                error = {'msgType': 'Errors',
+                        'errors': f'Required key not specified {exc}'}
+                await ws.send_message(json.dumps(error))
+    except* ConnectionClosed:
+        logger.debug('Connection on bus data collector port has closed')
 
 
 async def send_buses(ws, buses, bounds):
@@ -69,7 +84,6 @@ async def listen_to_browser(ws, bounds):
         try:
             new_bounds = get_bounds_from(message)
             bounds.update(new_bounds)
-            await ws.send_message('Message recieved')
         except json.JSONDecodeError as exc:
             logger.error(f'Decode error: {exc=}')
             bounds.error = 'Not a valid JSON provided'
