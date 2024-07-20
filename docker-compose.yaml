@@ -1,0 +1,36 @@
+version: '3'
+
+services:
+  ws_server:
+    image: python/trio
+    build: 
+      context: .
+    restart: always
+    ports:
+      - 8000
+      - 8080
+    volumes:
+      - ./:usr/src/app
+    entrypoint: ["python", "server.py"]
+
+  http_server:
+    image: python/trio
+    build: 
+      context: .
+    restart: always
+    ports:
+      - 8000
+    volumes:
+      - ./:usr/src/app
+    entrypoint: ["python", "-m", "http.server"]
+
+  fake_bus:
+    image: python/trio
+    build: 
+      context: .
+    restart: always
+    ports:
+      - 8000
+    volumes:
+      - ./:usr/src/app
+    entrypoint: ["python", "fake_bus.py"]
