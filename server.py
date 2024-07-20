@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 from dataclasses import asdict
+from functools import partial
 
 import asyncclick as click
 import trio
@@ -14,76 +15,78 @@ from models import Bus, WindowBounds
 logger = logging.getLogger(name=__name__)
 
 
-async def recieve_bus_data(request, buses):
+async def recieve_bus_data(buses, request):
     ws = await request.accept()
-    while True:
-        try:
+    try:
+        while True:
             message = await ws.get_message()
             bus = Bus(*json.loads(message).values())
             busId = bus.busId
             buses[busId] = bus
-        except ConnectionClosed:
-            break
+    except ConnectionClosed:
+        logger.debug('Connection on bus collector port was closed')
 
 
-async def send_bus_data(ws, buses, bounds):
+async def send_buses(ws, buses, bounds):
+    answer = {'msgType': 'Buses',
+              'buses': [asdict(bus) for bus in buses.values() 
+                        if bus.is_inside(bounds)], }
+    if len(answer['buses']):
+        logger.debug(f'Send buses: {len(answer['buses'])} bus(es)')
+        await ws.send_message(json.dumps(answer))
+    logger.debug(f'Delay: {BROWSER_DELAY}sec')
+    await trio.sleep(BROWSER_DELAY)
+    
+
+async def send_error(ws, bounds):
+    answer = {'msgType': 'Errors',
+              'errors': bounds.error, }
+    logger.debug(f'Send error: {bounds.error}')
+    await ws.send_message(json.dumps(answer))
+    logger.debug(f'Delay: 0sec')
+    return
+    
+
+async def send_answer_to_browser(ws, buses, bounds):
     while True:
-        try:
-            answer = {
-                'msgType': 'Buses',
-                'buses': [
-                    asdict(bus) for bus in buses.values()
-                    if bus.is_inside(bounds)
-                ]
-            }
-            await ws.send_message(json.dumps(answer))
-            await trio.sleep(BROWSER_DELAY)
-        except ConnectionClosed:
-            break
+        if bounds.error:
+            await send_error(ws, bounds)
+        else:
+            await send_buses(ws, buses, bounds)
 
 
 def get_bounds_from(message):
-    return json.loads(message)['data']
+    message_decoded = json.loads(message)
+    if message_decoded['msgType'] != 'newBounds':
+        raise KeyError('Wrong message type')
+    return message_decoded['data']
 
 
-async def handle_empty_message(ws):
-    try:
-        answer = {'msgType': 'Errors', 'errors': ['Requires valid JSON']}
-        await ws.send_message(json.dumps(answer))
-    except ConnectionClosed:
-        pass
-
-
-async def handle_wrong_message(ws):
-    try:
-        answer = {'msgType': 'Errors', 'errors': ['Requires msgType specified']}
-        await ws.send_message(json.dumps(answer))
-    except ConnectionClosed:
-        pass
-
-
-async def listen_browser(ws, bounds):
+async def listen_to_browser(ws, bounds):
     while True:
+        message = await ws.get_message()
+        logger.debug(f'{message=}')
         try:
-            message = await ws.get_message()
             new_bounds = get_bounds_from(message)
             bounds.update(new_bounds)
-        except ConnectionClosed:
-            break
+            await ws.send_message('Message recieved')
         except json.JSONDecodeError as exc:
-            logger.error(exc)
-            await handle_empty_message(ws)
+            logger.error(f'Decode error: {exc=}')
+            bounds.error = 'Not a valid JSON provided'
         except KeyError as exc:
-            logger.error(exc)
-            await handle_wrong_message(ws)
+            logger.error(f'Key doesn\'t exist: {exc=}')
+            bounds.error = f'Required key not specified {exc}'
 
 
-async def handle_browser(request, buses):
+async def handle_browser(buses, request):
     ws = await request.accept()
     bounds = WindowBounds()
-    async with trio.open_nursery() as nursery:
-        nursery.start_soon(listen_browser, ws, bounds)
-        nursery.start_soon(send_bus_data, ws, buses, bounds)
+    try:
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(listen_to_browser, ws, bounds)
+            nursery.start_soon(send_answer_to_browser, ws, buses, bounds)
+    except* ConnectionClosed:
+        logger.debug('Connection on browsers port was closed')
 
 
 '''
@@ -108,21 +111,15 @@ async def main(**kwargs):
 
     buses = {}
 
-    def bus_get_data_handler(request): return recieve_bus_data(request, buses)
+    bus_get_data_handler = partial(recieve_bus_data, buses)
 
-    def bus_get_data_server():
-        return serve_websocket(bus_get_data_handler, '127.0.0.1',
-                               bus_port, ssl_context=None)
-
-    def bus_send_data_handler(request): return handle_browser(request, buses)
-
-    def bus_send_data_server():
-        return serve_websocket(bus_send_data_handler, '127.0.0.1',
-                               browser_port, ssl_context=None)
+    bus_send_data_handler = partial(handle_browser, buses)
 
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(bus_get_data_server)
-        nursery.start_soon(bus_send_data_server)
+        nursery.start_soon(serve_websocket, bus_get_data_handler,
+                           '127.0.0.1', bus_port, None)
+        nursery.start_soon(serve_websocket, bus_send_data_handler,
+                           '127.0.0.1', browser_port, None)
 
     
 if __name__ == '__main__':

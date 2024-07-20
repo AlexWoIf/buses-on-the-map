@@ -8,6 +8,7 @@ class WindowBounds:
     north_lat: float = None
     west_lng: float = None
     east_lng: float = None
+    error: str = ''
 
     def update(self, new_bounds):
         self.west_lng = new_bounds['west_lng']
