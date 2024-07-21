@@ -111,7 +111,7 @@ v — настройка логирования
 @click.command()
 @click.option('--bus_port', default=8080, help='Порт для имитатора автобусов')
 @click.option('--browser_port', default=8000, help='Порт для браузера')
-@click.option('-v', default=DEBUG_LEVEL, help='Порт для браузера')
+@click.option('-v', default=DEBUG_LEVEL, help='Уровень логгирования')
 async def main(**kwargs):
     bus_port = kwargs['bus_port']
     browser_port = kwargs['browser_port']
@@ -131,9 +131,9 @@ async def main(**kwargs):
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(serve_websocket, bus_get_data_handler,
-                           '127.0.0.1', bus_port, None)
+                           '0.0.0.0', bus_port, None)
         nursery.start_soon(serve_websocket, bus_send_data_handler,
-                           '127.0.0.1', browser_port, None)
+                           '0.0.0.0', browser_port, None)
 
     
 if __name__ == '__main__':

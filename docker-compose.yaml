@@ -10,7 +10,7 @@ services:
       - 8000
       - 8080
     volumes:
-      - ./:usr/src/app
+      - ./:/usr/src/app
     entrypoint: ["python", "server.py"]
 
   http_server:
@@ -21,7 +21,7 @@ services:
     ports:
       - 8000
     volumes:
-      - ./:usr/src/app
+      - ./:/usr/src/app
     entrypoint: ["python", "-m", "http.server"]
 
   fake_bus:
@@ -29,8 +29,6 @@ services:
     build: 
       context: .
     restart: always
-    ports:
-      - 8000
     volumes:
-      - ./:usr/src/app
+      - ./:/usr/src/app
     entrypoint: ["python", "fake_bus.py"]
